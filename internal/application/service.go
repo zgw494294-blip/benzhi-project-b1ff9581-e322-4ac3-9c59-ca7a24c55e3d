@@ -453,22 +453,13 @@ func (s *Service) VerifyCredentialBatch(ctx context.Context, ids []string) (doma
 	if !ok {
 		return domain.CredentialVerificationReceipt{}, fmt.Errorf("%w：暂不支持批量核验", domain.ErrValidation)
 	}
-	type result struct {
-		receipt domain.CredentialVerificationReceipt
-		err     error
-	}
-	done := make(chan result, 1)
-	workCtx := context.WithoutCancel(ctx)
-	go func() {
-		receipt, err := q.VerifyCredentialBatch(workCtx, ids)
-		done <- result{receipt: receipt, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		return domain.CredentialVerificationReceipt{}, ctx.Err()
-	case completed := <-done:
-		return completed.receipt, completed.err
-	}
+	// Run the verification flow synchronously under the request context so that a
+	// client cancellation aborts the whole pipeline: the storage transaction is
+	// begun and committed with this context, so a cancellation rolls back any
+	// in-progress work and leaves no persisted receipt or residual background task.
+	// When the request is not cancelled, the transaction completes and the full,
+	// queryable verification receipt is saved and returned.
+	return q.VerifyCredentialBatch(ctx, ids)
 }
 func (s *Service) VerificationReceipt(ctx context.Context, id string) (domain.CredentialVerificationReceipt, error) {
 	q, ok := s.repo.(interface {
