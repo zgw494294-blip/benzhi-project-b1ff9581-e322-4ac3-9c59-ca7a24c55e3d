@@ -11,17 +11,20 @@ import (
 func (s *SQLite) RetestCase(ctx context.Context, caseID, result, operator, notes, key string, expected int) (domain.Case, error) {
 	var c domain.Case
 	err := tx(ctx, s.db, func(t *sql.Tx) error {
-		var status string
-		if err := t.QueryRowContext(ctx, `SELECT status FROM cases WHERE id=?`, caseID).Scan(&status); err != nil {
-			return domain.ErrNotFound
-		}
+		// 幂等重放与冲突判定必须在状态/版本校验之前完成，否则首次提交已推进状态后，
+		// 客户端以相同幂等键与版本重放会在状态校验处被拒绝，无法返回首次结果。
 		if key != "" {
-			var existing string
-			if err := t.QueryRowContext(ctx, `SELECT result FROM retests WHERE idempotency_key=?`, key).Scan(&existing); err == nil {
+			var prevCaseID, prevResult, prevOperator, prevNotes sql.NullString
+			if qErr := t.QueryRowContext(ctx, `SELECT case_id,result,operator,notes FROM retests WHERE idempotency_key=?`, key).Scan(&prevCaseID, &prevResult, &prevOperator, &prevNotes); qErr == nil {
+				if prevCaseID.String != caseID || prevResult.String != result || prevOperator.String != operator || prevNotes.String != notes {
+					return domain.ErrConflict
+				}
 				if err := t.QueryRowContext(ctx, `SELECT id,tree_code,species,location,owner,status,version,created_at,updated_at FROM cases WHERE id=?`, caseID).Scan(&c.ID, &c.TreeCode, &c.Species, &c.Location, &c.Owner, &c.Status, &c.Version, new(string), new(string)); err != nil {
 					return domain.ErrNotFound
 				}
 				return nil
+			} else if qErr != sql.ErrNoRows {
+				return qErr
 			}
 		}
 		if err := t.QueryRowContext(ctx, `SELECT id,tree_code,species,location,owner,status,version,created_at,updated_at FROM cases WHERE id=?`, caseID).Scan(&c.ID, &c.TreeCode, &c.Species, &c.Location, &c.Owner, &c.Status, &c.Version, new(string), new(string)); err != nil {

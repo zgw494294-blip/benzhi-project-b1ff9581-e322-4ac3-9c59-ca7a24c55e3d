@@ -310,12 +310,18 @@ func (s *Service) RetestWithKey(ctx context.Context, caseID, result, operator, n
 	if !domain.ValidateActor(operator) || !domain.IsPassingResult(result) && !domain.IsFailingResult(result) {
 		return c, fmt.Errorf("%w：复检人或结果无效", domain.ErrValidation)
 	}
+	txr, ok := s.repo.(interface {
+		RetestCase(context.Context, string, string, string, string, string, int) (domain.Case, error)
+	})
+	// 当携带幂等键且仓储支持幂等复检时，重放/冲突/首次提交的判定都由仓储在事务内完成：
+	// 首次提交已推进状态后，相同键与版本的重放不能再被状态预校验拦截，否则无法返回首次结果。
+	if ok && key != "" {
+		return txr.RetestCase(ctx, caseID, result, operator, notes, key, expected)
+	}
 	if err := domain.CanRetest(c, r, result); err != nil {
 		return c, err
 	}
-	if txr, ok := s.repo.(interface {
-		RetestCase(context.Context, string, string, string, string, string, int) (domain.Case, error)
-	}); ok {
+	if ok {
 		return txr.RetestCase(ctx, caseID, result, operator, notes, key, expected)
 	}
 	return s.Retest(ctx, caseID, result, operator, expected)
