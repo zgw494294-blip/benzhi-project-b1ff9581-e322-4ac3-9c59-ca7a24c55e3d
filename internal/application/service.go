@@ -152,33 +152,32 @@ func (s *Service) Search(ctx context.Context, f SearchFilter) (SearchResult, err
 	if err != nil {
 		return SearchResult{}, err
 	}
-	out := SearchResult{Counts: map[string]int{}, RiskDistribution: map[string]int{}, NextCursor: next}
-	viewErrors := make(chan error, len(cases))
-	riskLevels := make(chan string, len(cases))
-	var views sync.WaitGroup
-	for _, c := range cases {
-		views.Add(1)
-		go func(caseID string) {
-			defer views.Done()
+	out := SearchResult{Cases: make([]CaseView, 0, len(cases)), Counts: map[string]int{}, RiskDistribution: map[string]int{}, NextCursor: next}
+	views := make([]CaseView, len(cases))
+	viewErrors := make([]error, len(cases))
+	var wg sync.WaitGroup
+	for i, c := range cases {
+		wg.Add(1)
+		go func(i int, caseID string) {
+			defer wg.Done()
 			v, e := s.View(ctx, caseID)
 			if e != nil {
-				viewErrors <- e
+				viewErrors[i] = e
 				return
 			}
-			out.Cases = append(out.Cases, v)
-			if v.Risk != nil {
-				riskLevels <- v.Risk.Level
-			}
-		}(c.ID)
+			views[i] = v
+		}(i, c.ID)
 	}
-	views.Wait()
-	close(viewErrors)
-	close(riskLevels)
-	for e := range viewErrors {
-		return out, e
-	}
-	for level := range riskLevels {
-		out.RiskDistribution[level]++
+	wg.Wait()
+	for i, e := range viewErrors {
+		if e != nil {
+			return out, e
+		}
+		v := views[i]
+		out.Cases = append(out.Cases, v)
+		if v.Risk != nil {
+			out.RiskDistribution[v.Risk.Level]++
+		}
 	}
 	if cq, ok := s.repo.(interface {
 		SummaryCounts(context.Context) (map[string]int, error)
