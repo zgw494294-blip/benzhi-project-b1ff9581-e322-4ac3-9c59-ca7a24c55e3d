@@ -380,7 +380,7 @@ func (s *Service) View(ctx context.Context, id string) (CaseView, error) {
 	const readCount = 7
 	reads := make(chan viewRead, readCount)
 	go func() {
-		items, err := s.repo.ListSamples(ctx, id)
+		items, err := s.repo.ListSamples(aggregateCtx, id)
 		reads <- viewRead{kind: "samples", value: items, err: err}
 	}()
 	go func() {
@@ -389,12 +389,12 @@ func (s *Service) View(ctx context.Context, id string) (CaseView, error) {
 		if q, ok := s.repo.(interface {
 			ListHandoffExceptions(context.Context, string) ([]domain.HandoffException, error)
 		}); ok {
-			items, err = q.ListHandoffExceptions(ctx, id)
+			items, err = q.ListHandoffExceptions(aggregateCtx, id)
 		}
 		reads <- viewRead{kind: "handoff-exceptions", value: items, err: err}
 	}()
 	go func() {
-		items, err := s.repo.ListTests(ctx, id)
+		items, err := s.repo.ListTests(aggregateCtx, id)
 		reads <- viewRead{kind: "tests", value: items, err: err}
 	}()
 	go func() {
@@ -403,26 +403,26 @@ func (s *Service) View(ctx context.Context, id string) (CaseView, error) {
 		if q, ok := s.repo.(interface {
 			ListTreatmentItems(context.Context, string) ([]domain.TreatmentItem, error)
 		}); ok {
-			items, err = q.ListTreatmentItems(ctx, id)
+			items, err = q.ListTreatmentItems(aggregateCtx, id)
 		}
 		reads <- viewRead{kind: "treatments", value: items, err: err}
 	}()
 	go func() {
-		risk, err := s.repo.GetRisk(ctx, id)
+		risk, err := s.repo.GetRisk(aggregateCtx, id)
 		if errors.Is(err, domain.ErrNotFound) {
 			err = nil
 		}
 		reads <- viewRead{kind: "risk", value: risk, err: err}
 	}()
 	go func() {
-		credential, err := s.repo.GetCredentialByCase(ctx, id)
+		credential, err := s.repo.GetCredentialByCase(aggregateCtx, id)
 		if errors.Is(err, domain.ErrNotFound) {
 			err = nil
 		}
 		reads <- viewRead{kind: "credential", value: credential, err: err}
 	}()
 	go func() {
-		events, err := s.repo.Events(ctx, id)
+		events, err := s.repo.Events(aggregateCtx, id)
 		reads <- viewRead{kind: "events", value: events, err: err}
 	}()
 
