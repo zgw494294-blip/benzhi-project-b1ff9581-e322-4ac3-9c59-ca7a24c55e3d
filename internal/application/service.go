@@ -457,7 +457,7 @@ func (s *Service) VerificationReceipt(ctx context.Context, id string) (domain.Cr
 	cached, ok := s.receiptCache[id]
 	s.receiptMu.RUnlock()
 	if ok {
-		return cached, nil
+		return cloneReceipt(cached), nil
 	}
 	q, ok := s.repo.(interface {
 		GetVerificationReceipt(context.Context, string) (domain.CredentialVerificationReceipt, error)
@@ -469,10 +469,24 @@ func (s *Service) VerificationReceipt(ctx context.Context, id string) (domain.Cr
 	if err != nil {
 		return receipt, err
 	}
+	stored := cloneReceipt(receipt)
 	s.receiptMu.Lock()
-	s.receiptCache[id] = receipt
+	s.receiptCache[id] = stored
 	s.receiptMu.Unlock()
-	return receipt, nil
+	return cloneReceipt(stored), nil
+}
+
+// cloneReceipt returns a deep copy of the receipt so that callers cannot
+// mutate cached data through slice aliases. CredentialVerificationItem
+// contains only string fields, so copying the slice elements is sufficient.
+func cloneReceipt(r domain.CredentialVerificationReceipt) domain.CredentialVerificationReceipt {
+	out := r
+	if r.Items != nil {
+		items := make([]domain.CredentialVerificationItem, len(r.Items))
+		copy(items, r.Items)
+		out.Items = items
+	}
+	return out
 }
 
 func (s *Service) VerifyCredential(ctx context.Context, id string) (domain.Credential, domain.Case, error) {
