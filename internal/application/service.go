@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-type Service struct{ repo domain.Repository }
+type Service struct {
+	repo    domain.Repository
+	reviews reviewGroup
+}
 
 func New(repo domain.Repository) *Service { return &Service{repo: repo} }
 
@@ -212,6 +215,12 @@ func (s *Service) AddTest(ctx context.Context, caseID, testType, operator, patho
 	return x, nil
 }
 func (s *Service) Review(ctx context.Context, caseID, decision, mitigation, reviewer string, expected int) (domain.RiskAssessment, error) {
+	return s.reviews.do(ctx, func() (domain.RiskAssessment, error) {
+		return s.review(ctx, caseID, decision, mitigation, reviewer, expected)
+	})
+}
+
+func (s *Service) review(ctx context.Context, caseID, decision, mitigation, reviewer string, expected int) (domain.RiskAssessment, error) {
 	if txr, ok := s.repo.(interface {
 		ReviewCase(context.Context, string, string, string, string, int) (domain.RiskAssessment, error)
 	}); ok {
