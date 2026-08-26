@@ -35,12 +35,7 @@ func (w *Workflow) Approve(ctx context.Context, command ReviewCommand) (domain.R
 	return w.service.Review(ctx, command.CaseID, command.Decision, command.Mitigation, command.Reviewer, command.ExpectedVersion)
 }
 func (w *Workflow) Verify(ctx context.Context, command RetestCommand) (domain.Case, error) {
-	if txr, ok := w.service.repo.(interface {
-		RetestCase(context.Context, string, string, string, string, string, int) (domain.Case, error)
-	}); ok {
-		return txr.RetestCase(ctx, command.CaseID, command.Result, command.Operator, command.Notes, command.IdempotencyKey, command.ExpectedVersion)
-	}
-	return w.service.Retest(ctx, command.CaseID, command.Result, command.Operator, command.ExpectedVersion)
+	return w.service.RetestWithKey(ctx, command.CaseID, command.Result, command.Operator, command.Notes, command.IdempotencyKey, command.ExpectedVersion)
 }
 func (w *Workflow) Release(ctx context.Context, caseID, issuer string) (domain.Credential, error) {
 	if issuer == "" {

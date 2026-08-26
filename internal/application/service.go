@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/benzhi/ancient-tree-pathogen/internal/domain"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -151,12 +152,28 @@ func (s *Service) Search(ctx context.Context, f SearchFilter) (SearchResult, err
 	if err != nil {
 		return SearchResult{}, err
 	}
-	out := SearchResult{Counts: map[string]int{}, RiskDistribution: map[string]int{}, NextCursor: next}
-	for _, c := range cases {
-		v, e := s.View(ctx, c.ID)
+	out := SearchResult{Cases: make([]CaseView, 0, len(cases)), Counts: map[string]int{}, RiskDistribution: map[string]int{}, NextCursor: next}
+	views := make([]CaseView, len(cases))
+	viewErrors := make([]error, len(cases))
+	var wg sync.WaitGroup
+	for i, c := range cases {
+		wg.Add(1)
+		go func(i int, caseID string) {
+			defer wg.Done()
+			v, e := s.View(ctx, caseID)
+			if e != nil {
+				viewErrors[i] = e
+				return
+			}
+			views[i] = v
+		}(i, c.ID)
+	}
+	wg.Wait()
+	for i, e := range viewErrors {
 		if e != nil {
 			return out, e
 		}
+		v := views[i]
 		out.Cases = append(out.Cases, v)
 		if v.Risk != nil {
 			out.RiskDistribution[v.Risk.Level]++
