@@ -5,12 +5,20 @@ import (
 	"fmt"
 	"github.com/benzhi/ancient-tree-pathogen/internal/domain"
 	"strings"
+	"sync"
 	"time"
 )
 
-type Service struct{ repo domain.Repository }
+type Service struct {
+	repo domain.Repository
 
-func New(repo domain.Repository) *Service { return &Service{repo: repo} }
+	searchMu    sync.RWMutex
+	searchCache map[SearchFilter]SearchResult
+}
+
+func New(repo domain.Repository) *Service {
+	return &Service{repo: repo, searchCache: make(map[SearchFilter]SearchResult)}
+}
 
 type CaseView struct {
 	Case              domain.Case
@@ -80,6 +88,9 @@ func (s *Service) Search(ctx context.Context, f SearchFilter) (SearchResult, err
 			return SearchResult{}, fmt.Errorf("%w：分页游标无效", domain.ErrValidation)
 		}
 	}
+	if cached, ok := s.cachedSearch(f); ok {
+		return cached, nil
+	}
 	if q, ok := s.repo.(interface {
 		SearchQueueCases(context.Context, string, string, string, string, string, string, int) ([]domain.Case, string, error)
 	}); ok && (f.Pathogen != "" || f.Method != "" || f.WaitFrom != 0 || f.WaitTo != 0 || f.DueWithin != 0 || f.Sort != "") {
@@ -139,6 +150,7 @@ func (s *Service) Search(ctx context.Context, f SearchFilter) (SearchResult, err
 				out.DueCount++
 			}
 		}
+		s.rememberSearch(f, out)
 		return out, nil
 	}
 	q, ok := s.repo.(interface {
@@ -169,6 +181,7 @@ func (s *Service) Search(ctx context.Context, f SearchFilter) (SearchResult, err
 			out.Counts = counts
 		}
 	}
+	s.rememberSearch(f, out)
 	return out, nil
 }
 
