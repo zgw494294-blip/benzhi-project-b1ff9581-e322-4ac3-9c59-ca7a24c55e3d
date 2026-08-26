@@ -5,12 +5,20 @@ import (
 	"fmt"
 	"github.com/benzhi/ancient-tree-pathogen/internal/domain"
 	"strings"
+	"sync"
 	"time"
 )
 
-type Service struct{ repo domain.Repository }
+type Service struct {
+	repo domain.Repository
 
-func New(repo domain.Repository) *Service { return &Service{repo: repo} }
+	receiptMu    sync.RWMutex
+	receiptCache map[string]domain.CredentialVerificationReceipt
+}
+
+func New(repo domain.Repository) *Service {
+	return &Service{repo: repo, receiptCache: make(map[string]domain.CredentialVerificationReceipt)}
+}
 
 type CaseView struct {
 	Case              domain.Case
@@ -445,13 +453,26 @@ func (s *Service) VerifyCredentialBatch(ctx context.Context, ids []string) (doma
 	return q.VerifyCredentialBatch(ctx, ids)
 }
 func (s *Service) VerificationReceipt(ctx context.Context, id string) (domain.CredentialVerificationReceipt, error) {
+	s.receiptMu.RLock()
+	cached, ok := s.receiptCache[id]
+	s.receiptMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
 	q, ok := s.repo.(interface {
 		GetVerificationReceipt(context.Context, string) (domain.CredentialVerificationReceipt, error)
 	})
 	if !ok {
 		return domain.CredentialVerificationReceipt{}, domain.ErrNotFound
 	}
-	return q.GetVerificationReceipt(ctx, id)
+	receipt, err := q.GetVerificationReceipt(ctx, id)
+	if err != nil {
+		return receipt, err
+	}
+	s.receiptMu.Lock()
+	s.receiptCache[id] = receipt
+	s.receiptMu.Unlock()
+	return receipt, nil
 }
 
 func (s *Service) VerifyCredential(ctx context.Context, id string) (domain.Credential, domain.Case, error) {
