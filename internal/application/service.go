@@ -339,7 +339,8 @@ func (s *Service) IssueCredential(ctx context.Context, caseID, issuer string) (d
 	if c.Status != domain.StatusReleased {
 		return domain.Credential{}, fmt.Errorf("%w：案卷尚未通过复检", domain.ErrValidation)
 	}
-	if old, e := s.repo.GetCredentialByCase(ctx, caseID); e == nil {
+	old, _ := s.repo.GetCredentialByCase(ctx, caseID)
+	if old.ID != "" {
 		return old, nil
 	}
 	r, e := s.repo.GetRisk(ctx, caseID)
