@@ -30,13 +30,16 @@ func (s *SQLite) ListHandoffExceptions(ctx context.Context, caseID string) ([]do
 	var out []domain.HandoffException
 	for rows.Next() {
 		var x domain.HandoffException
-		var a, b, c, d sql.NullString
-		if err := rows.Scan(&x.ID, &x.CaseID, &x.SampleCode, &a, &x.Collector, &x.SealCode, &b, &x.Receiver, &x.Condition, &x.Sequence, &x.Reason, &c, &x.Correction, &x.NewSealCode, &x.ResolvedSampleID, &d); err != nil {
+		var a, b, c, correction, newSeal, resolvedSample, d sql.NullString
+		if err := rows.Scan(&x.ID, &x.CaseID, &x.SampleCode, &a, &x.Collector, &x.SealCode, &b, &x.Receiver, &x.Condition, &x.Sequence, &x.Reason, &c, &correction, &newSeal, &resolvedSample, &d); err != nil {
 			return nil, err
 		}
 		x.CollectedAt = parse(a.String)
 		x.HandoffAt = parse(b.String)
 		x.OccurredAt = parse(c.String)
+		x.Correction = correction.String
+		x.NewSealCode = newSeal.String
+		x.ResolvedSampleID = resolvedSample.String
 		if d.Valid {
 			t := parse(d.String)
 			x.ClosedAt = &t
@@ -205,13 +208,14 @@ func (s *SQLite) ListTreatmentItems(ctx context.Context, caseID string) ([]domai
 	var out []domain.TreatmentItem
 	for rows.Next() {
 		var x domain.TreatmentItem
-		var p, c, cr sql.NullString
+		var p, c, evidence, cr sql.NullString
 		var req int
-		if e = rows.Scan(&x.ID, &x.CaseID, &x.Content, &x.Assignee, &p, &req, &c, &x.Evidence, &cr); e != nil {
+		if e = rows.Scan(&x.ID, &x.CaseID, &x.Content, &x.Assignee, &p, &req, &c, &evidence, &cr); e != nil {
 			return nil, e
 		}
 		x.PlannedAt = parse(p.String)
 		x.Required = req == 1
+		x.Evidence = evidence.String
 		x.CreatedAt = parse(cr.String)
 		if c.Valid {
 			t := parse(c.String)
@@ -232,13 +236,14 @@ func (s *SQLite) CompleteTreatmentItem(ctx context.Context, caseID, itemID, assi
 			return domain.ErrConflict
 		}
 		var item domain.TreatmentItem
-		var p, c, cr sql.NullString
+		var p, c, storedEvidence, cr sql.NullString
 		var req int
-		if e := t.QueryRowContext(ctx, `SELECT id,case_id,content,assignee,planned_at,required,completed_at,evidence,created_at FROM treatment_items WHERE id=? AND case_id=?`, itemID, caseID).Scan(&item.ID, &item.CaseID, &item.Content, &item.Assignee, &p, &req, &c, &item.Evidence, &cr); e != nil {
+		if e := t.QueryRowContext(ctx, `SELECT id,case_id,content,assignee,planned_at,required,completed_at,evidence,created_at FROM treatment_items WHERE id=? AND case_id=?`, itemID, caseID).Scan(&item.ID, &item.CaseID, &item.Content, &item.Assignee, &p, &req, &c, &storedEvidence, &cr); e != nil {
 			return domain.ErrNotFound
 		}
 		item.PlannedAt = parse(p.String)
 		item.Required = req == 1
+		item.Evidence = storedEvidence.String
 		item.CreatedAt = parse(cr.String)
 		if c.Valid {
 			t := parse(c.String)
