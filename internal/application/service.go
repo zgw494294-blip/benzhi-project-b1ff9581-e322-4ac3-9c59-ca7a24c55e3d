@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/benzhi/ancient-tree-pathogen/internal/domain"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -152,15 +153,32 @@ func (s *Service) Search(ctx context.Context, f SearchFilter) (SearchResult, err
 		return SearchResult{}, err
 	}
 	out := SearchResult{Counts: map[string]int{}, RiskDistribution: map[string]int{}, NextCursor: next}
+	viewErrors := make(chan error, len(cases))
+	riskLevels := make(chan string, len(cases))
+	var views sync.WaitGroup
 	for _, c := range cases {
-		v, e := s.View(ctx, c.ID)
-		if e != nil {
-			return out, e
-		}
-		out.Cases = append(out.Cases, v)
-		if v.Risk != nil {
-			out.RiskDistribution[v.Risk.Level]++
-		}
+		views.Add(1)
+		go func(caseID string) {
+			defer views.Done()
+			v, e := s.View(ctx, caseID)
+			if e != nil {
+				viewErrors <- e
+				return
+			}
+			out.Cases = append(out.Cases, v)
+			if v.Risk != nil {
+				riskLevels <- v.Risk.Level
+			}
+		}(c.ID)
+	}
+	views.Wait()
+	close(viewErrors)
+	close(riskLevels)
+	for e := range viewErrors {
+		return out, e
+	}
+	for level := range riskLevels {
+		out.RiskDistribution[level]++
 	}
 	if cq, ok := s.repo.(interface {
 		SummaryCounts(context.Context) (map[string]int, error)
