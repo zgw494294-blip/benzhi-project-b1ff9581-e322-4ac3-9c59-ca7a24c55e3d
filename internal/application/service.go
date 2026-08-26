@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/benzhi/ancient-tree-pathogen/internal/domain"
 	"strings"
@@ -21,6 +22,12 @@ type CaseView struct {
 	Risk              *domain.RiskAssessment
 	Credential        *domain.Credential
 	Events            []domain.AuditEvent
+}
+
+type viewRead struct {
+	kind  string
+	value any
+	err   error
 }
 
 type SearchFilter struct {
@@ -367,26 +374,89 @@ func (s *Service) View(ctx context.Context, id string) (CaseView, error) {
 	if e != nil {
 		return CaseView{}, e
 	}
+	aggregateCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	const readCount = 7
+	reads := make(chan viewRead, readCount)
+	go func() {
+		items, err := s.repo.ListSamples(ctx, id)
+		reads <- viewRead{kind: "samples", value: items, err: err}
+	}()
+	go func() {
+		var items []domain.HandoffException
+		var err error
+		if q, ok := s.repo.(interface {
+			ListHandoffExceptions(context.Context, string) ([]domain.HandoffException, error)
+		}); ok {
+			items, err = q.ListHandoffExceptions(ctx, id)
+		}
+		reads <- viewRead{kind: "handoff-exceptions", value: items, err: err}
+	}()
+	go func() {
+		items, err := s.repo.ListTests(ctx, id)
+		reads <- viewRead{kind: "tests", value: items, err: err}
+	}()
+	go func() {
+		var items []domain.TreatmentItem
+		var err error
+		if q, ok := s.repo.(interface {
+			ListTreatmentItems(context.Context, string) ([]domain.TreatmentItem, error)
+		}); ok {
+			items, err = q.ListTreatmentItems(ctx, id)
+		}
+		reads <- viewRead{kind: "treatments", value: items, err: err}
+	}()
+	go func() {
+		risk, err := s.repo.GetRisk(ctx, id)
+		if errors.Is(err, domain.ErrNotFound) {
+			err = nil
+		}
+		reads <- viewRead{kind: "risk", value: risk, err: err}
+	}()
+	go func() {
+		credential, err := s.repo.GetCredentialByCase(ctx, id)
+		if errors.Is(err, domain.ErrNotFound) {
+			err = nil
+		}
+		reads <- viewRead{kind: "credential", value: credential, err: err}
+	}()
+	go func() {
+		events, err := s.repo.Events(ctx, id)
+		reads <- viewRead{kind: "events", value: events, err: err}
+	}()
+
 	v := CaseView{Case: c}
-	v.Samples, _ = s.repo.ListSamples(ctx, id)
-	if q, ok := s.repo.(interface {
-		ListHandoffExceptions(context.Context, string) ([]domain.HandoffException, error)
-	}); ok {
-		v.HandoffExceptions, _ = q.ListHandoffExceptions(ctx, id)
+	for i := 0; i < readCount; i++ {
+		select {
+		case <-aggregateCtx.Done():
+			return CaseView{}, aggregateCtx.Err()
+		case read := <-reads:
+			if read.err != nil {
+				return CaseView{}, fmt.Errorf("读取案卷%s失败: %w", read.kind, read.err)
+			}
+			switch read.kind {
+			case "samples":
+				v.Samples = read.value.([]domain.SampleChain)
+			case "handoff-exceptions":
+				v.HandoffExceptions = read.value.([]domain.HandoffException)
+			case "tests":
+				v.Tests = read.value.([]domain.TestResult)
+			case "treatments":
+				v.Treatments = read.value.([]domain.TreatmentItem)
+			case "risk":
+				if risk := read.value.(domain.RiskAssessment); risk.ID != "" {
+					v.Risk = &risk
+				}
+			case "credential":
+				if credential := read.value.(domain.Credential); credential.ID != "" {
+					v.Credential = &credential
+				}
+			case "events":
+				v.Events = read.value.([]domain.AuditEvent)
+			}
+		}
 	}
-	v.Tests, _ = s.repo.ListTests(ctx, id)
-	if q, ok := s.repo.(interface {
-		ListTreatmentItems(context.Context, string) ([]domain.TreatmentItem, error)
-	}); ok {
-		v.Treatments, _ = q.ListTreatmentItems(ctx, id)
-	}
-	if r, e := s.repo.GetRisk(ctx, id); e == nil {
-		v.Risk = &r
-	}
-	if x, e := s.repo.GetCredentialByCase(ctx, id); e == nil {
-		v.Credential = &x
-	}
-	v.Events, _ = s.repo.Events(ctx, id)
 	return v, nil
 }
 

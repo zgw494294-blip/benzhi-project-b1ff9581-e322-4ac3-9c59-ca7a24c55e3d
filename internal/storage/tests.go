@@ -96,11 +96,15 @@ func (s *SQLite) ListTests(ctx context.Context, id string) ([]domain.TestResult,
 	for rows.Next() {
 		var x domain.TestResult
 		var p string
-		var invalidated sql.NullString
-		if e = rows.Scan(&x.ID, &x.CaseID, &x.TestType, &p, &x.Operator, &x.Pathogen, &x.Load, &x.Method, &x.Result, &x.Notes, &invalidated, &x.InvalidatedBy, &x.InvalidationReason, &x.ReplacesTestID, &x.CorrectionRequestID); e != nil {
+		var invalidated, invalidatedBy, invalidationReason, replacesTestID, correctionRequestID sql.NullString
+		if e = rows.Scan(&x.ID, &x.CaseID, &x.TestType, &p, &x.Operator, &x.Pathogen, &x.Load, &x.Method, &x.Result, &x.Notes, &invalidated, &invalidatedBy, &invalidationReason, &replacesTestID, &correctionRequestID); e != nil {
 			return nil, e
 		}
 		x.PerformedAt = parse(p)
+		x.InvalidatedBy = invalidatedBy.String
+		x.InvalidationReason = invalidationReason.String
+		x.ReplacesTestID = replacesTestID.String
+		x.CorrectionRequestID = correctionRequestID.String
 		if invalidated.Valid {
 			t := parse(invalidated.String)
 			x.InvalidatedAt = &t
