@@ -310,6 +310,17 @@ func (s *Service) RetestWithKey(ctx context.Context, caseID, result, operator, n
 	if !domain.ValidateActor(operator) || !domain.IsPassingResult(result) && !domain.IsFailingResult(result) {
 		return c, fmt.Errorf("%w：复检人或结果无效", domain.ErrValidation)
 	}
+	if readiness, ok := s.repo.(interface {
+		RetestReadiness(context.Context, string) ([]string, error)
+	}); ok {
+		missing, readinessErr := readiness.RetestReadiness(ctx, caseID)
+		if readinessErr != nil {
+			return c, readinessErr
+		}
+		if len(missing) > 0 {
+			return c, fmt.Errorf("%w：必需处置项尚未完成：%s", domain.ErrValidation, strings.Join(missing, "、"))
+		}
+	}
 	if err := domain.CanRetest(c, r, result); err != nil {
 		return c, err
 	}
@@ -442,7 +453,22 @@ func (s *Service) VerifyCredentialBatch(ctx context.Context, ids []string) (doma
 	if !ok {
 		return domain.CredentialVerificationReceipt{}, fmt.Errorf("%w：暂不支持批量核验", domain.ErrValidation)
 	}
-	return q.VerifyCredentialBatch(ctx, ids)
+	type result struct {
+		receipt domain.CredentialVerificationReceipt
+		err     error
+	}
+	done := make(chan result, 1)
+	workCtx := context.WithoutCancel(ctx)
+	go func() {
+		receipt, err := q.VerifyCredentialBatch(workCtx, ids)
+		done <- result{receipt: receipt, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return domain.CredentialVerificationReceipt{}, ctx.Err()
+	case completed := <-done:
+		return completed.receipt, completed.err
+	}
 }
 func (s *Service) VerificationReceipt(ctx context.Context, id string) (domain.CredentialVerificationReceipt, error) {
 	q, ok := s.repo.(interface {
