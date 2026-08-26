@@ -310,6 +310,17 @@ func (s *Service) RetestWithKey(ctx context.Context, caseID, result, operator, n
 	if !domain.ValidateActor(operator) || !domain.IsPassingResult(result) && !domain.IsFailingResult(result) {
 		return c, fmt.Errorf("%w：复检人或结果无效", domain.ErrValidation)
 	}
+	if readiness, ok := s.repo.(interface {
+		RetestReadiness(context.Context, string) ([]string, error)
+	}); ok {
+		missing, readinessErr := readiness.RetestReadiness(ctx, caseID)
+		if readinessErr != nil {
+			return c, readinessErr
+		}
+		if len(missing) > 0 {
+			return c, fmt.Errorf("%w：必需处置项尚未完成：%s", domain.ErrValidation, strings.Join(missing, "、"))
+		}
+	}
 	if err := domain.CanRetest(c, r, result); err != nil {
 		return c, err
 	}
@@ -442,6 +453,12 @@ func (s *Service) VerifyCredentialBatch(ctx context.Context, ids []string) (doma
 	if !ok {
 		return domain.CredentialVerificationReceipt{}, fmt.Errorf("%w：暂不支持批量核验", domain.ErrValidation)
 	}
+	// Run the verification flow synchronously under the request context so that a
+	// client cancellation aborts the whole pipeline: the storage transaction is
+	// begun and committed with this context, so a cancellation rolls back any
+	// in-progress work and leaves no persisted receipt or residual background task.
+	// When the request is not cancelled, the transaction completes and the full,
+	// queryable verification receipt is saved and returned.
 	return q.VerifyCredentialBatch(ctx, ids)
 }
 func (s *Service) VerificationReceipt(ctx context.Context, id string) (domain.CredentialVerificationReceipt, error) {
