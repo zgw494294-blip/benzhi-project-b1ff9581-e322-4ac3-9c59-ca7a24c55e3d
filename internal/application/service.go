@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/benzhi/ancient-tree-pathogen/internal/domain"
 	"strings"
@@ -339,7 +340,11 @@ func (s *Service) IssueCredential(ctx context.Context, caseID, issuer string) (d
 	if c.Status != domain.StatusReleased {
 		return domain.Credential{}, fmt.Errorf("%w：案卷尚未通过复检", domain.ErrValidation)
 	}
-	if old, e := s.repo.GetCredentialByCase(ctx, caseID); e == nil {
+	old, e := s.repo.GetCredentialByCase(ctx, caseID)
+	if e != nil && !errors.Is(e, domain.ErrNotFound) {
+		return domain.Credential{}, e
+	}
+	if old.ID != "" {
 		return old, nil
 	}
 	r, e := s.repo.GetRisk(ctx, caseID)
