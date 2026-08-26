@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-type Service struct{ repo domain.Repository }
+type Service struct {
+	repo         domain.Repository
+	verification verificationGroup
+}
 
 func New(repo domain.Repository) *Service { return &Service{repo: repo} }
 
@@ -455,6 +458,10 @@ func (s *Service) VerificationReceipt(ctx context.Context, id string) (domain.Cr
 }
 
 func (s *Service) VerifyCredential(ctx context.Context, id string) (domain.Credential, domain.Case, error) {
+	return s.verification.do(ctx, id, s.verifyCredential)
+}
+
+func (s *Service) verifyCredential(ctx context.Context, id string) (domain.Credential, domain.Case, error) {
 	credential, err := s.repo.GetCredential(ctx, id)
 	if err != nil {
 		return domain.Credential{}, domain.Case{}, err
